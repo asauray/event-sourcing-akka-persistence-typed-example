@@ -1,5 +1,9 @@
 package net.sauray.domain;
 
+import akka.actor.typed.ActorRef;
+import akka.actor.typed.Behavior;
+import akka.actor.typed.javadsl.ActorContext;
+import akka.actor.typed.javadsl.Behaviors;
 import akka.persistence.typed.PersistenceId;
 import akka.persistence.typed.javadsl.CommandHandler;
 import akka.persistence.typed.javadsl.CommandHandlerBuilder;
@@ -12,6 +16,12 @@ import net.sauray.domain.commands.replies.*;
 import net.sauray.domain.events.*;
 import net.sauray.domain.states.*;
 
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.UUID;
+
 /*
  * BankAccountEntity.java
  * Copyright (C) 2020 antoinesauray <sauray.antoine@gmail.com>
@@ -22,18 +32,29 @@ import net.sauray.domain.states.*;
 public class BankAccountEntity extends EventSourcedBehavior<BankCommand, BankEvent, BankAccountState>
 {
 
-  // static EventSourcedBehavior<BankCommand, BankEvent, BankState> eventSourcedBehavior = new BankAccountEntity(new PersistenceId("test"));
-  public static EventSourcedBehavior<BankCommand, BankEvent, BankAccountState> createBehavior(String persistenceId) {
-    return new BankAccountEntity(new PersistenceId("test"));
+  // this makes the context available to the command handler etc.
+  private final ActorContext<BankCommand> context;
+
+  // optionally if you only need `ActorContext.getSelf()`
+  private final ActorRef<BankCommand> self;
+
+  public static String TAG = "bank-account";
+  public static Set<String> tags = new HashSet<>(Collections.singletonList(TAG));
+
+
+  public static Behavior<BankCommand> create(String persistenceId) {
+    return Behaviors.setup(context -> new BankAccountEntity(new PersistenceId(persistenceId), context));
   }
 
-  public BankAccountEntity(PersistenceId persistenceId) {
+  public BankAccountEntity(PersistenceId persistenceId, ActorContext<BankCommand> context) {
     super(persistenceId);
+    this.context = context;
+    this.self = context.getSelf();
   }
 
   @Override
   public BankAccountState emptyState() {
-    return new BankAccountState(0l);
+    return new BankAccountState(0L);
   }
 
   @Override
@@ -42,15 +63,15 @@ public class BankAccountEntity extends EventSourcedBehavior<BankCommand, BankEve
 
     builder
       .forState(state -> state.getAmountCents() > 0)
-      .onCommand(RemoveMoneyFromAccount.class, (state, cmd) -> handleRemoveMoneyFromAccount(state, cmd))
-      .onCommand(GetAccountBalance.class, (state, cmd) -> Effect().reply(cmd, new BankCommandSuccessfulReply(state)));
+      .onCommand(RemoveMoneyFromAccount.class, this::handleRemoveMoneyFromAccount);
 
     builder.forState(state -> state.getAmountCents() <= 0)
-      .onCommand(RemoveMoneyFromAccount.class, cmd -> Effect().reply(cmd, new InsufficientFunds(0l, cmd.getAmountCents())));
+      .onCommand(RemoveMoneyFromAccount.class, cmd -> Effect().reply(cmd.getReplyTo(), new InsufficientFunds(0L, cmd.getAmountCents())));
 
     builder
       .forAnyState()
-      .onCommand(AddMoneyOnAccount.class, cmd -> handleAddMoneyOnAccount(cmd));
+      .onCommand(AddMoneyOnAccount.class, this::handleAddMoneyOnAccount)
+      .onCommand(GetAccountBalance.class, (state, cmd) -> Effect().reply(cmd.getReplyTo(), new BankCommandSuccessfulReply(state, null)));
 
 
     return builder
@@ -58,33 +79,37 @@ public class BankAccountEntity extends EventSourcedBehavior<BankCommand, BankEve
   }
 
   @Override
+  public Set<String> tagsFor(BankEvent event) {
+    return tags;
+  }
+
+  @Override
   public EventHandler<BankAccountState, BankEvent> eventHandler() {
     return newEventHandlerBuilder()
       .forAnyState()
-      .onEvent(MoneyAddedToAccount.class, (state, event) -> handleMoneyAddedToAccount(state, event))
-      .onEvent(MoneyRemovedFromAccount.class, (state, event) -> handleMoneyRemovedFromAccount(state, event))
+      .onEvent(MoneyAddedToAccount.class, this::handleMoneyAddedToAccount)
+      .onEvent(MoneyRemovedFromAccount.class, this::handleMoneyRemovedFromAccount)
       .build();
   }
 
   public Effect<BankEvent, BankAccountState> handleAddMoneyOnAccount(AddMoneyOnAccount command) {
-    BankEvent event = new MoneyAddedToAccount(command.getAmountCents());
-    return 
+    BankEvent event = new MoneyAddedToAccount(UUID.randomUUID(), command.getAmountCents());
+    return
       Effect()
       .persist(event)
-      .thenReply(command, state -> new BankCommandSuccessfulReply(state));
+      .thenReply(command.getReplyTo(), state -> new BankCommandSuccessfulReply(state, event.id()));
   }
 
   public Effect<BankEvent, BankAccountState> handleRemoveMoneyFromAccount(BankAccountState previousState, RemoveMoneyFromAccount command) {
     if(previousState.getAmountCents() - command.getAmountCents() > 0) {
-      BankEvent event = new MoneyRemovedFromAccount(command.getAmountCents());
+      BankEvent event = new MoneyRemovedFromAccount(UUID.randomUUID(), command.getAmountCents());
       return Effect()
         .persist(event)
-        .thenReply(command, state -> new BankCommandSuccessfulReply(state));
+        .thenReply(command.getReplyTo(), state -> new BankCommandSuccessfulReply(state, event.id()));
     } else {
       return Effect()
-        .reply(command, new InsufficientFunds(previousState.getAmountCents(), command.getAmountCents()));
+        .reply(command.getReplyTo(), new InsufficientFunds(previousState.getAmountCents(), command.getAmountCents()));
     }
-
   }
 
   public BankAccountState handleMoneyAddedToAccount(BankAccountState state, MoneyAddedToAccount event) {

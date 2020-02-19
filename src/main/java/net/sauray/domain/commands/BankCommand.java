@@ -1,6 +1,6 @@
 package net.sauray.domain.commands;
 
-import akka.persistence.typed.ExpectingReply;
+import akka.actor.typed.ActorRef;
 import net.sauray.domain.commands.replies.BankCommandReply;
 
 /*
@@ -10,7 +10,9 @@ import net.sauray.domain.commands.replies.BankCommandReply;
  * Distributed under terms of the MIT license.
  */
 
-public interface BankCommand extends ExpectingReply<BankCommandReply>
+public interface BankCommand
 {
-  
+    ActorRef<BankCommandReply> getReplyTo();
+    String entityId();
+
 }
