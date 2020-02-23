@@ -4,17 +4,20 @@ import java.sql.SQLException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
 import akka.Done;
+import akka.NotUsed;
 import akka.actor.typed.ActorRef;
 import akka.actor.typed.ActorSystem;
 import akka.actor.typed.Behavior;
@@ -22,9 +25,12 @@ import akka.actor.typed.javadsl.AskPattern;
 import akka.event.Logging;
 import akka.event.LoggingAdapter;
 import akka.persistence.jdbc.query.javadsl.JdbcReadJournal;
+import akka.persistence.query.EventEnvelope;
 import akka.persistence.query.Offset;
 import akka.persistence.query.PersistenceQuery;
 import akka.stream.javadsl.Sink;
+import akka.stream.javadsl.Source;
+
 import com.typesafe.config.Config;
 import javacutils.Pair;
 import net.sauray.application.Guardian.BankCommandWrapper;
@@ -37,7 +43,12 @@ import net.sauray.domain.events.*;
 
 import com.typesafe.config.ConfigFactory;
 import net.sauray.domain.readside.relationnalprojection.ReadSideActor;
+import net.sauray.domain.readside.relationnalprojection.ReadSideSubscriber;
 import net.sauray.infrastructure.Consistency;
+import net.sauray.infrastructure.ReactiveSQL;
+
+import org.reactivestreams.Subscriber;
+import org.reactivestreams.Subscription;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -78,26 +89,40 @@ public class Main
                     error.printStackTrace();
                 } else {
 
-                readJournal
+                try {
+                    final var conn = ReactiveSQL.reactiveConnection(user, password, database, host, port).block();
+                    readJournal
                         .eventsByTag(BankAccountEntity.TAG, Offset.sequence(startingOffset))
-                        .mapAsync(5, envelope -> {
-                            final CompletionStage<Done> f =
-                                    AskPattern.ask(
-                                            system,
-                                            (ActorRef<Done> replyTo) -> new Guardian.UpdateReadSides(envelope.persistenceId(), (BankEvent)envelope.event(), replyTo),
-                                            timeout,
-                                            system.scheduler());
-                            return f.thenApplyAsync(in -> Pair.of(envelope.offset(), (BankEvent)envelope.event()), system.executionContext());
-                        })
-                        .map(pair -> {
-                            var latch = seenEvents.get(pair.second.id());
-                            if(latch != null) { latch.notify();}
-                            return pair;
-                        })
-                        .mapAsync(10, pair -> offsetStore.updateOffset(ReadSideActor.readSideId, pair.first))
-                        .runWith(Sink.ignore(), system);
+                        .grouped(1)
+                        .runWith(Sink.fromSubscriber(new ReadSideSubscriber(conn)), system);
 
                     Main.start(system, offsetStore);
+                } catch (InterruptedException | ExecutionException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                }
+
+                // eventStream.mapAsync(5, envelope -> {
+                //             final CompletionStage<Done> f =
+                //                     AskPattern.ask(
+                //                             system,
+                //                             (ActorRef<Done> replyTo) -> new Guardian.UpdateReadSides(envelope.persistenceId(), (BankEvent)envelope.event(), replyTo),
+                //                             timeout,
+                //                             system.scheduler());
+                //             return f.thenApplyAsync(in -> Pair.of(envelope.offset(), (BankEvent)envelope.event()), system.executionContext());
+                //         })
+                        // .map(pair -> {
+                        //     var latch = seenEvents.get(pair.second.id());
+                        //     if(latch != null) { latch.notify();}
+                        //     return pair;
+                        // })
+                        // .mapAsync(5, pair -> {
+                        //   offsetStore.updateOffset(ReadSideActor.readSideId, pair.first);
+                        //   return pair.second;
+                        // })
+                        
+                        //.runWith(Sink.ignore(), system);
+
                 }
             });
 
@@ -114,11 +139,12 @@ public class Main
           if(latch.await(5, TimeUnit.SECONDS)) {
             return CompletableFuture.completedStage(reply);
           } else {
+            logger.warn("ReadSide out of sync");
             return CompletableFuture.completedStage(reply);
           }
         } catch (InterruptedException e) {
             e.printStackTrace();
-            logger.warn("ReadSide out of sync");
+            logger.warn("Thread interrupted: ReadSide out of sync");
             return CompletableFuture.completedStage(reply);
         }
       } else {
@@ -187,6 +213,9 @@ public class Main
         System.out.println(system.path().toString());
 
         logger.info("Adding money started");
+         for (int i = 0; i < 50; i++) {
+          addMoney(system, offsetStore, "2", 10L, Consistency.STRONG);
+         }
         addMoney(system, offsetStore, "2", 10L, Consistency.STRONG)
                 .thenCompose(reply -> {
                     logger.info("Money added finished");

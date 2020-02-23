@@ -4,6 +4,8 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 
+
+
 public class SQL {
 
     public static Connection newConnection(String user, String password, String database, String host, int port) throws SQLException {
@@ -12,4 +14,6 @@ public class SQL {
         // PreparedStatement and ResultSet are handled by jOOQ, internally
         return DriverManager.getConnection(url, user, password);
     }
+
+    
 }
