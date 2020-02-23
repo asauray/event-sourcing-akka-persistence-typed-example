@@ -2,7 +2,9 @@ package net.sauray.application;
 
 import java.sql.SQLException;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -48,12 +50,10 @@ public class Main
 
     public static final Logger logger = LoggerFactory.getLogger(Main.class);
 
-    static Set<UUID> seenEvents = new HashSet<>();
+    static Map<UUID, CountDownLatch> seenEvents = new HashMap<>();
 
     public static void main( String[] args )
     {
-        new java.util.concurrent.Flow()
-
         System.out.println( "Hello World!" );
 
         Config conf = ConfigFactory.load();
@@ -90,10 +90,11 @@ public class Main
                             return f.thenApplyAsync(in -> Pair.of(envelope.offset(), (BankEvent)envelope.event()), system.executionContext());
                         })
                         .map(pair -> {
-                            seenEvents.add(pair.second.id());
+                            var latch = seenEvents.get(pair.second.id());
+                            if(latch != null) { latch.notify();}
                             return pair;
                         })
-                        .mapAsync(1, pair -> offsetStore.updateOffset(ReadSideActor.readSideId, pair.first))
+                        .mapAsync(10, pair -> offsetStore.updateOffset(ReadSideActor.readSideId, pair.first))
                         .runWith(Sink.ignore(), system);
 
                     Main.start(system, offsetStore);
@@ -105,20 +106,24 @@ public class Main
         }
     }
 
-    private static CompletableFuture<Void> letMeKnow(UUID eventId) {
-        return CompletableFuture.runAsync(() -> {
-            while(!seenEvents.contains(eventId)) {
-                for (UUID seenEvent : seenEvents) {
-                    logger.info(seenEvent.toString());
-                }
-                try {
-                    Thread.sleep(10);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-            logger.info("READ SIDE HAS NOW SEEN EVENT " + eventId.toString());
-        }).orTimeout(15, TimeUnit.SECONDS);
+    private static CompletionStage<BankCommandReply> waitForReadSide(BankCommandReply reply) {
+      if(reply.eventId() != null) {
+        CountDownLatch latch = new CountDownLatch(1);
+        seenEvents.put(reply.eventId(), latch);
+        try {
+          if(latch.await(5, TimeUnit.SECONDS)) {
+            return CompletableFuture.completedStage(reply);
+          } else {
+            return CompletableFuture.completedStage(reply);
+          }
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+            logger.warn("ReadSide out of sync");
+            return CompletableFuture.completedStage(reply);
+        }
+      } else {
+        return CompletableFuture.completedFuture(reply);
+      }
     }
 
     private static CompletionStage<BankCommandReply> removeMoney(ActorSystem<CommandWrapper> system, OffsetStore offsetStore, String accountId, long value, Consistency consistency) {
@@ -133,11 +138,7 @@ public class Main
                 (reply) -> {
                     switch(consistency) {
                         case STRONG:
-                            if(reply.eventId() != null) {
-                                return letMeKnow(reply.eventId()).thenApply((t) -> reply);
-                            } else {
-                                return CompletableFuture.completedFuture(reply);
-                            }
+                           waitForReadSide(reply);
                         case EVENTUAL:
                             return CompletableFuture.completedFuture(reply);
                         default:
@@ -169,7 +170,7 @@ public class Main
                 (reply) -> {
                     switch(consistency) {
                         case STRONG:
-                            return letMeKnow(reply.eventId()).thenApply((t) -> reply);
+                            waitForReadSide(reply);
                         case EVENTUAL:
                             return CompletableFuture.completedFuture(reply);
                         default:
@@ -177,17 +178,7 @@ public class Main
                     }
                 }
         );
-
     }
-/*
-        if(failure != null) {
-                        var test = CompletableFuture.<BankCommandReply>failedFuture(new Exception(""));
-                        return test;
-                    } else {
-
-                    }
-                    return CompletableFuture.<BankCommandReply>failedFuture(new Exception(""));
-         */
 
 
     private static void start(ActorSystem<CommandWrapper> system, OffsetStore offsetStore) {
@@ -200,7 +191,7 @@ public class Main
                 .thenCompose(reply -> {
                     logger.info("Money added finished");
                     logger.info("Removing money started ");
-                    return removeMoney(system, offsetStore, "1", 1L, Consistency.EVENTUAL);
+                    return removeMoney(system, offsetStore, "1", 1L, Consistency.STRONG);
                 })
                 .thenCompose(reply -> {
                     logger.info("Money removed finished");
@@ -210,7 +201,7 @@ public class Main
                 .thenCompose(reply -> {
                     logger.info("Getting money finished");
                     logger.info("Removing money started ");
-                    return removeMoney(system, offsetStore, "1", 2L, Consistency.EVENTUAL);
+                    return removeMoney(system, offsetStore, "1", 2L, Consistency.STRONG);
                 })
         .whenComplete((reply, error) -> {
             logger.info("Money removed finished");
