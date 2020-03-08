@@ -15,12 +15,19 @@ public class AddMoneyOnAccount implements BankCommand
 {
   
   private final Long amountCents;
+  private final String accountId;
   private final ActorRef<BankCommandReply> actorReplyTo;
 
-  public AddMoneyOnAccount(Long amountCents, ActorRef<BankCommandReply> replyTo) {
+  public AddMoneyOnAccount(String accountId, Long amountCents, ActorRef<BankCommandReply> replyTo) {
     Utils.validateIsPositive(amountCents);
+    this.accountId = accountId;
     this.amountCents = amountCents;
     this.actorReplyTo = replyTo;
+  }
+
+  @Override
+  public String entityId() {
+    return accountId;
   }
 
   public Long getAmountCents() {
@@ -28,7 +35,7 @@ public class AddMoneyOnAccount implements BankCommand
   }
 
   @Override
-  public ActorRef<BankCommandReply> replyTo() {
+  public ActorRef<BankCommandReply> getReplyTo() {
     return this.actorReplyTo;
   }
 }

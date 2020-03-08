@@ -13,12 +13,19 @@ import net.sauray.domain.commands.replies.BankCommandReply;
 public class GetAccountBalance implements BankCommand
 {
   private final ActorRef<BankCommandReply> actorReplyTo;
-  public GetAccountBalance(ActorRef<BankCommandReply> actorReplyTo) {
+  private final String accountId;
+  public GetAccountBalance(String accountId, ActorRef<BankCommandReply> actorReplyTo) {
+    this.accountId = accountId;
     this.actorReplyTo = actorReplyTo; 
   }
 
   @Override
-  public ActorRef<BankCommandReply> replyTo() {
+  public String entityId() {
+    return accountId;
+  }
+
+  @Override
+  public ActorRef<BankCommandReply> getReplyTo() {
     return actorReplyTo;
   }
 }

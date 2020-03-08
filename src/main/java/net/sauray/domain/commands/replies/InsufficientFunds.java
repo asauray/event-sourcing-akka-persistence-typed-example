@@ -7,6 +7,8 @@ package net.sauray.domain.commands.replies;
  * Distributed under terms of the MIT license.
  */
 
+import java.util.UUID;
+
 public class InsufficientFunds implements BankCommandReply {
 
   private final Long amountCents;
@@ -28,5 +30,10 @@ public class InsufficientFunds implements BankCommandReply {
   @Override
   public String toString() {
     return String.format("Bank Command failed: insufficient funds %d, required %d", this.amountCents, this.requiredAmountCents);
+  }
+
+  @Override
+  public UUID eventId() {
+    return null;
   }
 }

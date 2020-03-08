@@ -7,8 +7,10 @@ package net.sauray.domain.commands.replies;
  * Distributed under terms of the MIT license.
  */
 
+import java.util.UUID;
+
 public interface BankCommandReply
 {
-  
+    UUID eventId();
 }
 

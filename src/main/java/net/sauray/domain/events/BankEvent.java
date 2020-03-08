@@ -7,8 +7,10 @@ package net.sauray.domain.events;
  * Distributed under terms of the MIT license.
  */
 
+import java.util.UUID;
+
 public interface BankEvent
 {
-  
+  UUID id();
 }
 

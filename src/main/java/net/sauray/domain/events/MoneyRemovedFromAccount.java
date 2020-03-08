@@ -7,17 +7,26 @@ package net.sauray.domain.events;
  * Distributed under terms of the MIT license.
  */
 
+import java.util.UUID;
+
 public class MoneyRemovedFromAccount implements BankEvent
 {
 
+  private UUID id;
   private final Long amountCents;
 
-  public MoneyRemovedFromAccount(Long amountCents) {
-    this.amountCents = amountCents; 
+  public MoneyRemovedFromAccount(UUID id, Long amountCents) {
+    this.id = id;
+    this.amountCents = amountCents;
   }
 
   public Long getAmountCents() {
     return amountCents;
+  }
+
+  @Override
+  public UUID id() {
+    return id;
   }
 }
 

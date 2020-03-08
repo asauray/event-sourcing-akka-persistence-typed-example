@@ -1,6 +1,7 @@
 package net.sauray.application.serializers;
 
 import java.io.UnsupportedEncodingException;
+import java.util.UUID;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -58,10 +59,12 @@ public class BankEventSerializer extends JSerializer {
       MoneyAddedToAccount moneyAddedToAccountEvent = (MoneyAddedToAccount) obj;
       eventJson.addProperty(EVENT_JSON_FIELD, MONEY_ADDED_TO_ACCOUNT);
       eventJson.addProperty("amount", moneyAddedToAccountEvent.getAmountCents());
+      eventJson.addProperty("eventId", moneyAddedToAccountEvent.id().toString());
     } else if (obj instanceof MoneyRemovedFromAccount) {
       MoneyRemovedFromAccount moneyRemovedFromAccountEvent = (MoneyRemovedFromAccount) obj;
       eventJson.addProperty(EVENT_JSON_FIELD, MONEY_REMOVED_FROM_ACCOUNT);
       eventJson.addProperty("amount", moneyRemovedFromAccountEvent.getAmountCents());
+      eventJson.addProperty("eventId", moneyRemovedFromAccountEvent.id().toString());
     }
     return gson.toJson(eventJson).getBytes();
   }
@@ -75,14 +78,14 @@ public class BankEventSerializer extends JSerializer {
 
       switch (jsonObj.get(EVENT_JSON_FIELD).getAsString()) {
         case "MoneyAddedToAccount": return deserializeMoneyAddedToAccount(jsonObj);
-        case "MoneyRemoveFromAccount": return deserializeMoneyRemovedFromAccount(jsonObj);
-        default: return null;
+        case "MoneyRemovedFromAccount": return deserializeMoneyRemovedFromAccount(jsonObj);
+        default: {
+          System.out.println(String.format("error: %s", (jsonObj.get(EVENT_JSON_FIELD).getAsString())));
+          return null;
+        }
       }
 
-    } catch (JsonSyntaxException e) {
-      e.printStackTrace();
-      return null;
-    } catch (UnsupportedEncodingException e) {
+    } catch (JsonSyntaxException | UnsupportedEncodingException e) {
       e.printStackTrace();
       return null;
     }
@@ -90,11 +93,13 @@ public class BankEventSerializer extends JSerializer {
 
   MoneyAddedToAccount deserializeMoneyAddedToAccount(JsonObject jsonObj) {
     Long amount = jsonObj.get("amount").getAsLong();
-    return new MoneyAddedToAccount(amount);
+    UUID eventId = UUID.fromString(jsonObj.get("eventId").getAsString());
+    return new MoneyAddedToAccount(eventId, amount);
   }
 
   MoneyRemovedFromAccount deserializeMoneyRemovedFromAccount(JsonObject jsonObj) {
     Long amount = jsonObj.get("amount").getAsLong();
-    return new MoneyRemovedFromAccount(amount);
+    UUID eventId = UUID.fromString(jsonObj.get("eventId").getAsString());
+    return new MoneyRemovedFromAccount(eventId, amount);
   }
 }
